@@ -38,8 +38,8 @@ const SCAN_PORTS = [80, 443, 8080, 8443, 8291, 8728, 3000, 9090];
 
 /**
  * Probe a single IP:port using fetch with timeout.
- * Returns true if ANYTHING responds (even errors like CORS, 401, 403).
- * Returns false only on connection timeout (host unreachable).
+ * CONSERVATIVE: only returns true if we got a real HTTP response.
+ * All errors/timeouts = false (host down or port closed).
  */
 async function probePort(ip: string, port: number, timeoutMs: number = 2000): Promise<boolean> {
   const controller = new AbortController();
@@ -47,30 +47,28 @@ async function probePort(ip: string, port: number, timeoutMs: number = 2000): Pr
   const scheme = port === 443 || port === 8443 ? 'https' : 'http';
 
   try {
-    await fetch(`${scheme}://${ip}:${port}/`, {
+    const response = await fetch(`${scheme}://${ip}:${port}/`, {
       method: 'HEAD',
       signal: controller.signal,
       // @ts-ignore — React Native specific
       reactNative: { textStreaming: true },
     });
     clearTimeout(timer);
-    return true; // Got a response — host is alive
+    // Got actual HTTP response (200, 401, 403, 404, 500, etc.) = host is alive
+    return true;
   } catch (err: any) {
     clearTimeout(timer);
-    // AbortError = timeout = host unreachable
-    if (err.name === 'AbortError') return false;
-    // Any other error (CORS, network error, SSL error) = host IS alive, just refused/blocked
-    // TypeError "Network request failed" on RN usually means connection refused = port closed
-    // But "Network request failed" can also mean CORS on web
+    // On native (Android/iOS): ALL errors mean host is down or port closed
+    // - AbortError = timeout
+    // - TypeError "Network request failed" = connection refused / unreachable
+    // - Any other error = also not alive
     if (Platform.OS === 'web') {
-      // On web, CORS errors mean the host responded — it's alive
-      return true;
+      // On web only: CORS TypeError means the host DID respond but browser blocked it
+      if (err.name === 'TypeError' && err.message !== 'Failed to fetch') {
+        return true;
+      }
     }
-    // On native (Android/iOS), "Network request failed" = connection refused = port closed
-    // But if we get here, something responded
-    const msg = String(err.message || err);
-    if (msg.includes('Network request failed')) return false;
-    return true; // Any other error = something is there
+    return false;
   }
 }
 
