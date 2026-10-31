@@ -245,8 +245,9 @@ export const DeviceListScreen = ({ navigation }: any) => {
         break;
       case 'http':
       case 'https':
-        Linking.openURL(`${device.protocol}://${device.host}:${device.port}`).catch(() => {
-          Alert.alert('Error', 'Tidak bisa membuka browser');
+        navigation.navigate('WebTerminal', {
+          deviceId: device.id,
+          url: `${device.protocol}://${device.host}:${device.port}`,
         });
         break;
       default:
