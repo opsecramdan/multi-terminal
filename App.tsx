@@ -44,6 +44,7 @@ function DevicesNavigator() {
     <DevicesStack.Navigator screenOptions={headerStyle}>
       <DevicesStack.Screen name="DeviceList" component={DeviceListScreen} options={{ title: 'Perangkat' }} />
       <DevicesStack.Screen name="AddDevice" component={AddDeviceScreen} options={{ title: 'Tambah Perangkat', presentation: 'modal' }} />
+      <DevicesStack.Screen name="EditDevice" component={AddDeviceScreen} options={{ title: 'Edit Perangkat', presentation: 'modal' }} />
       <DevicesStack.Screen name="Terminal" component={TerminalScreen} options={{ headerShown: false }} />
       <DevicesStack.Screen name="WebTerminal" component={WebTerminalScreen} options={{ headerShown: false }} />
       <DevicesStack.Screen name="MikroTik" component={MikroTikScreen} options={{ headerShown: false }} />
