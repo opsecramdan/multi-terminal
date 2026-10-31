@@ -1,4 +1,4 @@
-// Scanner Screen — Network discovery with simulated scan for Expo Go
+// Scanner Screen — Network discovery with dynamic simulation based on input subnet
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
@@ -24,26 +24,83 @@ interface SimDevice {
   ip: string; mac: string; vendor: string; type: string; ports: string;
 }
 
-const MOCK_DEVICES: SimDevice[] = [
-  { ip: '192.168.88.1', mac: 'E4:8D:8C:AB:12:34', vendor: 'mikrotik', type: 'router', ports: '22, 80, 8291, 8728' },
-  { ip: '192.168.88.10', mac: '70:4C:A5:11:22:33', vendor: 'fortigate', type: 'firewall', ports: '22, 443, 541' },
-  { ip: '192.168.88.20', mac: '00:05:85:AA:BB:CC', vendor: 'juniper', type: 'router', ports: '22, 443, 830' },
-  { ip: '192.168.88.50', mac: '14:CC:20:DE:F0:01', vendor: 'tplink', type: 'access-point', ports: '80, 443' },
-  { ip: '192.168.88.51', mac: '1C:7E:E5:12:34:56', vendor: 'dlink', type: 'access-point', ports: '80, 23' },
-  { ip: '192.168.88.100', mac: 'FC:EC:DA:99:88:77', vendor: 'ubiquiti', type: 'access-point', ports: '22, 80, 443' },
-  { ip: '192.168.88.200', mac: '00:1E:10:AB:CD:EF', vendor: 'huawei', type: 'router', ports: '22, 23, 80, 443' },
+// ============================================
+// Dynamic device generator — uses the actual subnet
+// ============================================
+
+// Device templates — the last octet will be set based on subnet
+const DEVICE_TEMPLATES = [
+  { octet: 1,   vendor: 'mikrotik',  type: 'router',       ports: '22, 80, 8291, 8728', macPrefix: 'E4:8D:8C' },
+  { octet: 2,   vendor: 'fortigate', type: 'firewall',     ports: '22, 443, 541',       macPrefix: '70:4C:A5' },
+  { octet: 5,   vendor: 'cisco',     type: 'switch',       ports: '22, 23, 443',        macPrefix: '00:01:42' },
+  { octet: 10,  vendor: 'juniper',   type: 'router',       ports: '22, 443, 830',       macPrefix: '00:05:85' },
+  { octet: 20,  vendor: 'huawei',    type: 'router',       ports: '22, 23, 80, 443',    macPrefix: '00:E0:FC' },
+  { octet: 50,  vendor: 'tplink',    type: 'access-point', ports: '80, 443',            macPrefix: '14:CC:20' },
+  { octet: 51,  vendor: 'dlink',     type: 'access-point', ports: '80, 23',             macPrefix: '1C:7E:E5' },
+  { octet: 52,  vendor: 'linksys',   type: 'access-point', ports: '80, 443',            macPrefix: '00:14:BF' },
+  { octet: 100, vendor: 'ubiquiti',  type: 'access-point', ports: '22, 80, 443',        macPrefix: 'FC:EC:DA' },
+  { octet: 200, vendor: 'generic',   type: 'server',       ports: '22, 80, 443, 3306',  macPrefix: 'AA:BB:CC' },
+  { octet: 250, vendor: 'mikrotik',  type: 'router',       ports: '22, 80, 8291, 8728', macPrefix: 'D4:01:C3' },
 ];
 
+function randomMac(prefix: string): string {
+  const rand = () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0').toUpperCase();
+  return `${prefix}:${rand()}:${rand()}:${rand()}`;
+}
+
+function parseSubnetBase(cidr: string): string {
+  // Extract base network from CIDR, e.g. "192.168.0.0/24" → "192.168.0"
+  const [network, maskStr] = cidr.split('/');
+  const parts = network.split('.');
+  const mask = parseInt(maskStr, 10);
+
+  if (mask >= 24) {
+    // /24 or smaller — first 3 octets are network
+    return `${parts[0]}.${parts[1]}.${parts[2]}`;
+  } else if (mask >= 16) {
+    // /16 — first 2 octets, use third from network
+    return `${parts[0]}.${parts[1]}.${parts[2]}`;
+  }
+  return `${parts[0]}.${parts[1]}.${parts[2]}`;
+}
+
+function generateDevicesForSubnet(cidr: string): SimDevice[] {
+  const base = parseSubnetBase(cidr);
+  const [, maskStr] = cidr.split('/');
+  const mask = parseInt(maskStr, 10);
+  const maxHost = Math.min(Math.pow(2, 32 - mask) - 2, 254);
+
+  // Filter templates to only include octets within range
+  const applicable = DEVICE_TEMPLATES.filter(t => t.octet <= maxHost);
+
+  // Shuffle order slightly so it feels like real discovery
+  const shuffled = [...applicable].sort(() => Math.random() - 0.5);
+
+  return shuffled.map(t => ({
+    ip: `${base}.${t.octet}`,
+    mac: randomMac(t.macPrefix),
+    vendor: t.vendor,
+    type: t.type,
+    ports: t.ports,
+  }));
+}
+
+// ============================================
+// Scanner Screen Component
+// ============================================
+
 export const ScannerScreen = ({ navigation }: any) => {
-  const [subnet, setSubnet] = useState('192.168.88.0/24');
+  const [subnet, setSubnet] = useState('192.168.0.0/24');
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [scanned, setScanned] = useState(0);
+  const [totalHosts, setTotalHosts] = useState(254);
   const [results, setResults] = useState<SimDevice[]>([]);
   const { addDevice } = useDeviceStore();
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countRef = useRef(0);
   const devIdxRef = useRef(0);
+  const devicesRef = useRef<SimDevice[]>([]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -71,9 +128,22 @@ export const ScannerScreen = ({ navigation }: any) => {
 
     const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
     if (!cidrRegex.test(subnet)) {
-      Alert.alert('Error', 'Format subnet tidak valid.\nContoh: 192.168.1.0/24');
+      Alert.alert('Error', 'Format subnet tidak valid.\nContoh: 192.168.0.0/24');
       return;
     }
+
+    // Parse mask to calculate total hosts
+    const mask = parseInt(subnet.split('/')[1], 10);
+    if (mask < 16 || mask > 30) {
+      Alert.alert('Error', 'Mask harus antara /16 dan /30');
+      return;
+    }
+    const hosts = Math.min(Math.pow(2, 32 - mask) - 2, 254);
+    setTotalHosts(hosts);
+
+    // Generate devices based on the actual subnet input
+    const generatedDevices = generateDevicesForSubnet(subnet);
+    devicesRef.current = generatedDevices;
 
     // Reset state
     setScanning(true);
@@ -85,24 +155,25 @@ export const ScannerScreen = ({ navigation }: any) => {
 
     timerRef.current = setInterval(() => {
       countRef.current += Math.floor(Math.random() * 8) + 3;
-      if (countRef.current > 254) countRef.current = 254;
+      if (countRef.current > hosts) countRef.current = hosts;
 
       const currentCount = countRef.current;
       setScanned(currentCount);
-      setProgress(Math.round(currentCount / 254 * 100));
+      setProgress(Math.round(currentCount / hosts * 100));
 
-      // Discover a device
-      if (devIdxRef.current < MOCK_DEVICES.length && Math.random() > 0.3) {
-        const device = MOCK_DEVICES[devIdxRef.current];
+      // Discover a device at random intervals
+      const devices = devicesRef.current;
+      if (devIdxRef.current < devices.length && Math.random() > 0.35) {
+        const device = devices[devIdxRef.current];
         devIdxRef.current++;
         setResults(prev => [...prev, device]);
       }
 
       // Scan complete
-      if (currentCount >= 254) {
-        // Add all remaining devices at once
-        const remaining = MOCK_DEVICES.slice(devIdxRef.current);
-        devIdxRef.current = MOCK_DEVICES.length;
+      if (currentCount >= hosts) {
+        // Add all remaining undiscovered devices
+        const remaining = devices.slice(devIdxRef.current);
+        devIdxRef.current = devices.length;
         if (remaining.length > 0) {
           setResults(prev => [...prev, ...remaining]);
         }
@@ -134,7 +205,7 @@ export const ScannerScreen = ({ navigation }: any) => {
       deviceType: dev.type as any,
       macAddress: dev.mac,
     });
-    Alert.alert('✓ Ditambahkan', `${dev.ip} berhasil ditambahkan`);
+    Alert.alert('✓ Ditambahkan', `${dev.ip} berhasil ditambahkan ke daftar perangkat`);
   }, [addDevice]);
 
   return (
@@ -144,7 +215,7 @@ export const ScannerScreen = ({ navigation }: any) => {
         <Text style={s.subtitle}>Temukan perangkat di jaringan lokal</Text>
         <View style={s.inputRow}>
           <TextInput style={s.subnetInput} value={subnet} onChangeText={setSubnet}
-            placeholder="192.168.1.0/24" placeholderTextColor="#6c7086"
+            placeholder="192.168.0.0/24" placeholderTextColor="#6c7086"
             autoCapitalize="none" keyboardType="url" editable={!scanning} />
           <TouchableOpacity
             style={[s.scanBtn, scanning && { backgroundColor: '#f38ba8' }]}
@@ -154,7 +225,7 @@ export const ScannerScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </View>
         <View style={s.shortcuts}>
-          {['192.168.1.0/24', '192.168.88.0/24', '10.0.0.0/24', '172.16.0.0/24'].map(sn => (
+          {['192.168.0.0/24', '192.168.1.0/24', '192.168.88.0/24', '10.0.0.0/24'].map(sn => (
             <TouchableOpacity key={sn}
               style={[s.shortcut, subnet === sn && s.shortcutActive]}
               onPress={() => setSubnet(sn)}>
@@ -171,7 +242,7 @@ export const ScannerScreen = ({ navigation }: any) => {
             <View style={[s.progressFill, { width: `${progress}%` }]} />
           </View>
           <Text style={s.progressText}>
-            {scanned}/254 host • {results.length} ditemukan • {scanned >= 254 ? 'Selesai ✓' : `${progress}%`}
+            {scanned}/{totalHosts} host • {results.length} ditemukan • {scanned >= totalHosts ? 'Selesai ✓' : `${progress}%`}
           </Text>
         </View>
       )}
