@@ -29,15 +29,16 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/EXPO_PROJECT_ID",
+      "url": "https://u.expo.dev/b445f5ca-2b74-4db7-900a-8ae02420a840",
       "enabled": true,
       "fallbackToCacheTimeout": 5000,
       "checkAutomatically": "ON_LOAD"
     },
     "extra": {
       "eas": {
-        "projectId": "EXPO_PROJECT_ID"
+        "projectId": "b445f5ca-2b74-4db7-900a-8ae02420a840"
       }
-    }
+    },
+    "owner": "opsecramdan"
   }
 }
