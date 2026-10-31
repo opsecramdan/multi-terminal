@@ -4,7 +4,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  ScrollView, Alert, KeyboardAvoidingView, Platform,
+  ScrollView, Alert, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useDeviceStore } from '../stores';
@@ -188,49 +188,37 @@ export const TerminalScreen = ({ route, navigation }: any) => {
 export const WebTerminalScreen = ({ route, navigation }: any) => {
   const { deviceId, url } = route.params;
   const device = useDeviceStore(s => s.devices.find(d => d.id === deviceId));
-  const [currentUrl, setCurrentUrl] = useState(url);
-  const [loading, setLoading] = useState(true);
-  const webViewRef = useRef<WebView>(null);
 
+  // WebView doesn't work in Expo Go — show fallback with open in browser
   return (
     <View style={s.container}>
-      <View style={s.urlBar}>
-        <TouchableOpacity onPress={() => webViewRef.current?.goBack()} style={s.urlBtn}>
-          <Text style={s.urlBtnText}>←</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => webViewRef.current?.goForward()} style={s.urlBtn}>
-          <Text style={s.urlBtnText}>→</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => webViewRef.current?.reload()} style={s.urlBtn}>
-          <Text style={s.urlBtnText}>↻</Text>
-        </TouchableOpacity>
-        <View style={s.urlDisplay}>
-          <Text style={s.urlText} numberOfLines={1}>{currentUrl}</Text>
+      <View style={s.statusBar}>
+        <View style={s.statusLeft}>
+          <View style={[s.dot, { backgroundColor: '#f9e2af' }]} />
+          <Text style={s.statusText}>{device?.name || url}</Text>
         </View>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={s.urlBtn}>
-          <Text style={[s.urlBtnText, { color: '#f38ba8' }]}>✕</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Text style={s.disconnectBtn}>✕</Text>
         </TouchableOpacity>
       </View>
 
-      <WebView
-        ref={webViewRef}
-        source={{ uri: url }}
-        style={{ flex: 1, backgroundColor: '#1e1e2e' }}
-        onLoadStart={() => setLoading(true)}
-        onLoadEnd={() => setLoading(false)}
-        onNavigationStateChange={state => setCurrentUrl(state.url)}
-        javaScriptEnabled
-        domStorageEnabled
-        originWhitelist={['*']}
-        mixedContentMode="always"
-        allowsBackForwardNavigationGestures
-      />
-
-      {loading && (
-        <View style={{ position: 'absolute', top: 50, left: 0, right: 0, alignItems: 'center' }}>
-          <Text style={{ color: '#74c7ec', fontSize: 13 }}>Loading...</Text>
-        </View>
-      )}
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 30 }}>
+        <Text style={{ fontSize: 50, marginBottom: 16 }}>🌐</Text>
+        <Text style={{ color: '#cdd6f4', fontSize: 18, fontWeight: '700', marginBottom: 8, textAlign: 'center' }}>
+          Web Interface
+        </Text>
+        <Text style={{ color: '#6c7086', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>
+          Perangkat ini diakses via browser.{'\n'}Tekan tombol di bawah untuk membuka.
+        </Text>
+        <Text style={{ color: '#a6adc8', fontSize: 12, fontFamily: 'monospace', marginBottom: 20 }}>
+          {url}
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#74c7ec', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 }}
+          onPress={() => Linking.openURL(url)}>
+          <Text style={{ color: '#1e1e2e', fontSize: 16, fontWeight: '700' }}>🌐 Buka di Browser</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };

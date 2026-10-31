@@ -156,7 +156,8 @@ export const ScannerScreen = ({ navigation }: any) => {
   const [scanned, setScanned] = useState(0);
   const [totalHosts, setTotalHosts] = useState(0);
   const [results, setResults] = useState<DiscoveredDevice[]>([]);
-  const { addDevice } = useDeviceStore();
+  const [addedIPs, setAddedIPs] = useState<Set<string>>(new Set());
+  const { addDevice, devices } = useDeviceStore();
   const abortRef = useRef(false);
 
   const stopScan = useCallback(() => {
@@ -241,7 +242,7 @@ export const ScannerScreen = ({ navigation }: any) => {
       vendor: dev.vendor as DeviceVendor,
       deviceType: dev.type as any,
     });
-    Alert.alert('✓ Ditambahkan', `${dev.ip} berhasil ditambahkan ke daftar perangkat`);
+    setAddedIPs(prev => new Set(prev).add(dev.ip));
   }, [addDevice]);
 
   return (
@@ -299,6 +300,9 @@ export const ScannerScreen = ({ navigation }: any) => {
         keyExtractor={(item, index) => `${item.ip}-${index}`}
         renderItem={({ item }) => {
           const vc = VENDOR_COLORS[item.vendor] || '#585b70';
+          const alreadyExists = devices.some(d => d.host === item.ip);
+          const justAdded = addedIPs.has(item.ip);
+          const isAdded = alreadyExists || justAdded;
           return (
             <View style={s.resultCard}>
               <View style={[s.vendorDot, { backgroundColor: vc }]} />
@@ -319,9 +323,15 @@ export const ScannerScreen = ({ navigation }: any) => {
                   Open ports: {item.openPorts.join(', ')}
                 </Text>
               </View>
-              <TouchableOpacity style={s.addBtn} onPress={() => handleAdd(item)}>
-                <Text style={s.addBtnText}>+ Tambah</Text>
-              </TouchableOpacity>
+              {isAdded ? (
+                <View style={s.addedBadge}>
+                  <Text style={s.addedBadgeText}>✓ {justAdded ? 'Ditambahkan' : 'Sudah ada'}</Text>
+                </View>
+              ) : (
+                <TouchableOpacity style={s.addBtn} onPress={() => handleAdd(item)}>
+                  <Text style={s.addBtnText}>+ Tambah</Text>
+                </TouchableOpacity>
+              )}
             </View>
           );
         }}
@@ -375,4 +385,6 @@ const s = StyleSheet.create({
   tagText: { color: '#bac2de', fontSize: 10, fontWeight: '500' },
   addBtn: { backgroundColor: 'rgba(116,199,236,0.12)', borderWidth: 1, borderColor: 'rgba(116,199,236,0.3)', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 7 },
   addBtnText: { color: '#74c7ec', fontSize: 11, fontWeight: '600' },
+  addedBadge: { backgroundColor: 'rgba(166,227,161,0.15)', borderWidth: 1, borderColor: 'rgba(166,227,161,0.3)', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 7 },
+  addedBadgeText: { color: '#a6e3a1', fontSize: 10, fontWeight: '600' },
 });
