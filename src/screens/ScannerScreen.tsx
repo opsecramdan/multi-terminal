@@ -1,6 +1,6 @@
 // Scanner Screen — Network discovery with simulated scan for Expo Go
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   TextInput, Alert,
@@ -41,13 +41,31 @@ export const ScannerScreen = ({ navigation }: any) => {
   const [scanned, setScanned] = useState(0);
   const [results, setResults] = useState<SimDevice[]>([]);
   const { addDevice } = useDeviceStore();
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countRef = useRef(0);
+  const devIdxRef = useRef(0);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
+
+  const stopScan = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setScanning(false);
+  }, []);
 
   const startScan = useCallback(() => {
     if (scanning) {
-      // Stop
-      if (timerRef.current) clearInterval(timerRef.current);
-      setScanning(false);
+      stopScan();
       return;
     }
 
@@ -57,36 +75,46 @@ export const ScannerScreen = ({ navigation }: any) => {
       return;
     }
 
+    // Reset state
     setScanning(true);
     setResults([]);
     setScanned(0);
     setProgress(0);
-
-    let count = 0;
-    let devIdx = 0;
+    countRef.current = 0;
+    devIdxRef.current = 0;
 
     timerRef.current = setInterval(() => {
-      count += Math.floor(Math.random() * 8) + 3;
-      if (count > 254) count = 254;
-      setScanned(count);
-      setProgress(Math.round(count / 254 * 100));
+      countRef.current += Math.floor(Math.random() * 8) + 3;
+      if (countRef.current > 254) countRef.current = 254;
 
-      if (devIdx < MOCK_DEVICES.length && Math.random() > 0.3) {
-        setResults(prev => [...prev, MOCK_DEVICES[devIdx]]);
-        devIdx++;
+      const currentCount = countRef.current;
+      setScanned(currentCount);
+      setProgress(Math.round(currentCount / 254 * 100));
+
+      // Discover a device
+      if (devIdxRef.current < MOCK_DEVICES.length && Math.random() > 0.3) {
+        const device = MOCK_DEVICES[devIdxRef.current];
+        devIdxRef.current++;
+        setResults(prev => [...prev, device]);
       }
 
-      if (count >= 254) {
-        if (timerRef.current) clearInterval(timerRef.current);
-        setScanning(false);
-        // Add remaining
-        while (devIdx < MOCK_DEVICES.length) {
-          setResults(prev => [...prev, MOCK_DEVICES[devIdx]]);
-          devIdx++;
+      // Scan complete
+      if (currentCount >= 254) {
+        // Add all remaining devices at once
+        const remaining = MOCK_DEVICES.slice(devIdxRef.current);
+        devIdxRef.current = MOCK_DEVICES.length;
+        if (remaining.length > 0) {
+          setResults(prev => [...prev, ...remaining]);
         }
+
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        setScanning(false);
       }
     }, 350);
-  }, [subnet, scanning]);
+  }, [subnet, scanning, stopScan]);
 
   const handleAdd = useCallback((dev: SimDevice) => {
     const portList = dev.ports.split(',').map(p => parseInt(p.trim()));
@@ -151,7 +179,7 @@ export const ScannerScreen = ({ navigation }: any) => {
       {/* Results */}
       <FlatList
         data={results}
-        keyExtractor={item => item.ip}
+        keyExtractor={(item, index) => `${item.ip}-${index}`}
         renderItem={({ item }) => {
           const vc = VENDOR_COLORS[item.vendor] || '#585b70';
           return (
