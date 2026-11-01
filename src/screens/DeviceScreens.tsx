@@ -408,6 +408,13 @@ export const AddDeviceScreen = ({ navigation, route }: any) => {
   const [port, setPort] = useState(String(existing?.port || '22'));
   const [protocol, setProtocol] = useState<ConnectionProtocol>(existing?.protocol || 'ssh');
   const [vendor, setVendor] = useState<DeviceVendor>(existing?.vendor || 'generic');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [authMethod, setAuthMethod] = useState<'password' | 'key'>('password');
+  const [sshKey, setSshKey] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const needsAuth = protocol === 'ssh' || protocol === 'telnet' || protocol === 'mikrotik-api';
 
   const protos: { key: ConnectionProtocol; defaultPort: string }[] = [
     { key: 'ssh', defaultPort: '22' }, { key: 'telnet', defaultPort: '23' },
@@ -438,6 +445,7 @@ export const AddDeviceScreen = ({ navigation, route }: any) => {
       <TextInput style={s.formInput} value={host} onChangeText={setHost} placeholder="192.168.1.1" placeholderTextColor="#6c7086" autoCapitalize="none" keyboardType="url" />
       <Text style={s.formLabel}>Port</Text>
       <TextInput style={s.formInput} value={port} onChangeText={setPort} placeholder="22" placeholderTextColor="#6c7086" keyboardType="numeric" />
+
       <Text style={s.formLabel}>Protocol</Text>
       <View style={s.protoRow}>
         {protos.map(p => {
@@ -450,6 +458,7 @@ export const AddDeviceScreen = ({ navigation, route }: any) => {
           );
         })}
       </View>
+
       <Text style={s.formLabel}>Vendor</Text>
       <View style={s.protoRow}>
         {vendorList.map(v => (
@@ -458,7 +467,66 @@ export const AddDeviceScreen = ({ navigation, route }: any) => {
           </TouchableOpacity>
         ))}
       </View>
-      <TouchableOpacity style={[s.saveBtn, { marginTop: 30 }]} onPress={handleSave}>
+
+      {/* Auth section — SSH, Telnet, MikroTik */}
+      {needsAuth && (
+        <>
+          <View style={s.authDivider}>
+            <View style={s.authLine} />
+            <Text style={s.authTitle}>🔐 Autentikasi</Text>
+            <View style={s.authLine} />
+          </View>
+
+          <Text style={s.formLabel}>Username</Text>
+          <TextInput style={s.formInput} value={username} onChangeText={setUsername}
+            placeholder="admin" placeholderTextColor="#6c7086" autoCapitalize="none" />
+
+          {protocol === 'ssh' && (
+            <>
+              <Text style={s.formLabel}>Metode Login</Text>
+              <View style={s.protoRow}>
+                <TouchableOpacity style={[s.protoBtn, authMethod === 'password' && s.protoBtnActive]}
+                  onPress={() => setAuthMethod('password')}>
+                  <Text style={[s.protoBtnText, authMethod === 'password' && s.protoBtnTextActive]}>🔑 Password</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.protoBtn, authMethod === 'key' && s.protoBtnActive]}
+                  onPress={() => setAuthMethod('key')}>
+                  <Text style={[s.protoBtnText, authMethod === 'key' && s.protoBtnTextActive]}>🗝 SSH Key</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          {(authMethod === 'password' || protocol !== 'ssh') && (
+            <>
+              <Text style={s.formLabel}>Password</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput style={[s.formInput, { flex: 1 }]} value={password} onChangeText={setPassword}
+                  placeholder="••••••••" placeholderTextColor="#6c7086" autoCapitalize="none"
+                  secureTextEntry={!showPassword} />
+                <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPassword(!showPassword)}>
+                  <Text style={{ fontSize: 18 }}>{showPassword ? '🙈' : '👁'}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          {protocol === 'ssh' && authMethod === 'key' && (
+            <>
+              <Text style={s.formLabel}>Private Key (PEM)</Text>
+              <TextInput
+                style={[s.formInput, { height: 120, textAlignVertical: 'top', fontFamily: 'monospace', fontSize: 11 }]}
+                value={sshKey} onChangeText={setSshKey}
+                placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}
+                placeholderTextColor="#585b70" multiline numberOfLines={6}
+                autoCapitalize="none" autoCorrect={false} />
+              <Text style={s.formHint}>Paste private key SSH. Format OpenSSH atau PEM (RSA/ED25519).</Text>
+            </>
+          )}
+        </>
+      )}
+
+      <TouchableOpacity style={[s.saveBtn, { marginTop: 24 }]} onPress={handleSave}>
         <Text style={s.saveBtnText}>{isEdit ? '💾 Update' : '💾 Simpan'}</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -554,4 +622,11 @@ const s = StyleSheet.create({
   vendorBtnTextActive: { color: '#a6e3a1' },
   saveBtn: { backgroundColor: '#a6e3a1', padding: 16, borderRadius: 12, alignItems: 'center' },
   saveBtnText: { color: '#1e1e2e', fontSize: 16, fontWeight: '700' },
+
+  // Auth form
+  authDivider: { flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 4, gap: 10 },
+  authLine: { flex: 1, height: 1, backgroundColor: '#45475a' },
+  authTitle: { color: '#89b4fa', fontSize: 13, fontWeight: '600' },
+  eyeBtn: { backgroundColor: '#313244', borderRadius: 10, width: 48, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#45475a' },
+  formHint: { color: '#585b70', fontSize: 11, marginTop: 5, lineHeight: 16 },
 });

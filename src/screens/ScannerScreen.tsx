@@ -37,43 +37,117 @@ interface DiscoveredDevice {
 const SCAN_PORTS = [80, 443, 8080, 8443, 8291, 8728, 3000, 9090];
 
 /**
- * Probe a single IP:port using fetch with timeout.
- * CONSERVATIVE: only returns true if we got a real HTTP response.
- * All errors/timeouts = false (host down or port closed).
+ * Probe a single IP:port using fetch with timing-based detection.
+ *
+ * On native (Android/iOS), fetch() throws 'TypeError: Network request failed'
+ * for BOTH connection-refused AND unreachable hosts. We distinguish them by
+ * how fast the error comes back:
+ *   - Connection refused: fails FAST (< 500ms) → host IS alive, port closed
+ *   - Unreachable/no host: times out or takes a long time → host is down
+ *
+ * Returns: { alive: boolean; response?: Response }
+ *   alive=true means the host exists (either HTTP responded or fast refusal).
+ *   response is set only when we got a real HTTP response (for header parsing).
  */
-async function probePort(ip: string, port: number, timeoutMs: number = 2000): Promise<boolean> {
+async function probePort(
+  ip: string, port: number, timeoutMs: number = 2000
+): Promise<{ alive: boolean; response?: Response }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const scheme = port === 443 || port === 8443 ? 'https' : 'http';
+  const startTime = Date.now();
 
   try {
     const response = await fetch(`${scheme}://${ip}:${port}/`, {
-      method: 'HEAD',
+      method: 'GET',
       signal: controller.signal,
       // @ts-ignore — React Native specific
       reactNative: { textStreaming: true },
     });
     clearTimeout(timer);
     // Got actual HTTP response (200, 401, 403, 404, 500, etc.) = host is alive
-    return true;
+    return { alive: true, response };
   } catch (err: any) {
     clearTimeout(timer);
-    // On native (Android/iOS): ALL errors mean host is down or port closed
-    // - AbortError = timeout
-    // - TypeError "Network request failed" = connection refused / unreachable
-    // - Any other error = also not alive
+    const elapsed = Date.now() - startTime;
+
     if (Platform.OS === 'web') {
-      // On web only: CORS TypeError means the host DID respond but browser blocked it
+      // On web: CORS TypeError means the host DID respond but browser blocked it
       if (err.name === 'TypeError' && err.message !== 'Failed to fetch') {
-        return true;
+        return { alive: true };
       }
+      return { alive: false };
     }
-    return false;
+
+    // Native (Android/iOS) — timing-based detection:
+    // AbortError = our timeout fired → host didn't respond in time → down
+    if (err.name === 'AbortError') {
+      return { alive: false };
+    }
+
+    // TypeError "Network request failed" — check timing:
+    // Fast failure (< 500ms) = connection refused = host IS alive, port closed
+    // Slow failure (>= 500ms) = network unreachable / no route = host down
+    const FAST_THRESHOLD = 500;
+    if (elapsed < FAST_THRESHOLD) {
+      return { alive: true }; // fast refusal → host exists
+    }
+
+    return { alive: false };
   }
 }
 
 /**
+ * Extract vendor name from HTTP response headers and body.
+ * Checks Server header, X-Powered-By, and HTML <title> tag.
+ */
+async function getVendorFromResponse(response: Response): Promise<string | null> {
+  const server = (response.headers.get('server') || '').toLowerCase();
+  const powered = (response.headers.get('x-powered-by') || '').toLowerCase();
+  const combined = server + ' ' + powered;
+
+  // Check Server / X-Powered-By headers for known vendor signatures
+  if (combined.includes('routeros') || combined.includes('mikrotik')) return 'mikrotik';
+  if (combined.includes('fortiweb') || combined.includes('fortios') || combined.includes('fortigate')) return 'fortigate';
+  if (combined.includes('juniper') || combined.includes('junos')) return 'juniper';
+  if (combined.includes('huawei') || combined.includes('vrp')) return 'huawei';
+  if (combined.includes('cisco') || combined.includes('ios-xe') || combined.includes('asa')) return 'cisco';
+  if (combined.includes('lighttpd')) return 'tplink'; // TP-Link uses lighttpd
+  if (combined.includes('tp-link')) return 'tplink';
+  if (combined.includes('goahead')) return 'dlink'; // D-Link uses GoAhead
+  if (combined.includes('d-link')) return 'dlink';
+  if (combined.includes('linksys')) return 'linksys';
+  if (combined.includes('ubnt') || combined.includes('ubiquiti') || combined.includes('unifi')) return 'ubiquiti';
+  if (combined.includes('nginx') || combined.includes('apache') || combined.includes('iis')) return 'generic';
+
+  // Try reading the body for <title> tag
+  try {
+    const body = await response.clone().text();
+    const titleMatch = body.match(/<title[^>]*>([^<]+)<\/title>/i);
+    if (titleMatch) {
+      const title = titleMatch[1].toLowerCase();
+      if (title.includes('mikrotik') || title.includes('routeros') || title.includes('winbox')) return 'mikrotik';
+      if (title.includes('fortinet') || title.includes('fortigate') || title.includes('fortios')) return 'fortigate';
+      if (title.includes('juniper') || title.includes('junos')) return 'juniper';
+      if (title.includes('huawei')) return 'huawei';
+      if (title.includes('cisco')) return 'cisco';
+      if (title.includes('tp-link') || title.includes('tplink')) return 'tplink';
+      if (title.includes('d-link') || title.includes('dlink')) return 'dlink';
+      if (title.includes('linksys')) return 'linksys';
+      if (title.includes('ubiquiti') || title.includes('unifi') || title.includes('ubnt')) return 'ubiquiti';
+    }
+  } catch {
+    // Body read failed — that's fine, headers were already checked
+  }
+
+  return null;
+}
+
+/**
  * Scan a single IP across multiple ports.
+ * Two-phase vendor detection:
+ *   1. Try to identify vendor from HTTP response headers/body
+ *   2. Fall back to port-based fingerprinting
  */
 async function scanHost(ip: string, ports: number[], timeout: number): Promise<DiscoveredDevice | null> {
   const start = Date.now();
@@ -81,19 +155,36 @@ async function scanHost(ip: string, ports: number[], timeout: number): Promise<D
   // Probe all ports in parallel
   const results = await Promise.all(
     ports.map(async (port) => {
-      const alive = await probePort(ip, port, timeout);
-      return { port, alive };
+      const result = await probePort(ip, port, timeout);
+      return { port, ...result };
     })
   );
 
-  const openPorts = results.filter(r => r.alive).map(r => r.port);
+  const alivePorts = results.filter(r => r.alive);
 
-  if (openPorts.length === 0) return null;
+  if (alivePorts.length === 0) return null;
 
+  const openPorts = alivePorts.map(r => r.port);
   const responseTime = Date.now() - start;
 
-  // Fingerprint based on open ports
-  const { vendor, type } = fingerprintDevice(openPorts);
+  // Phase 1: Try vendor detection from HTTP responses
+  let httpVendor: string | null = null;
+  for (const result of alivePorts) {
+    if (result.response) {
+      try {
+        httpVendor = await getVendorFromResponse(result.response);
+        if (httpVendor) break;
+      } catch {
+        // Response read failed, continue to next
+      }
+    }
+  }
+
+  // Phase 2: Fall back to port-based fingerprinting
+  const fingerprint = fingerprintDevice(openPorts);
+
+  const vendor = httpVendor || fingerprint.vendor;
+  const type = fingerprint.type;
 
   return { ip, openPorts, vendor, type, responseTime };
 }
