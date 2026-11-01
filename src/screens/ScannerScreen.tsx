@@ -245,6 +245,7 @@ export const ScannerScreen = ({ navigation }: any) => {
     setScanning(true);
     setResults([]);
     setScanned(0);
+    setAddedIPs(new Set());
     setProgress(0);
     abortRef.current = false;
 

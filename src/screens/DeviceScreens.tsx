@@ -252,13 +252,25 @@ export const DeviceListScreen = ({ navigation }: any) => {
         });
         break;
       case 'rdp':
-        // Open RDP via external app (Microsoft Remote Desktop, etc.)
+        // Open RDP - try multiple URI schemes for different RD apps
+        const rdpHost = `${device.host}:${device.port}`;
         Alert.alert(
           '🖥 RDP Connect',
-          `Buka ${device.host}:${device.port} di app Remote Desktop?\n\nPastikan app "Microsoft Remote Desktop" atau "RD Client" sudah terinstall.`,
+          `Koneksi ke ${rdpHost}\n\nPilih app Remote Desktop:`,
           [
             { text: 'Batal', style: 'cancel' },
-            { text: 'Buka', onPress: () => Linking.openURL(`rdp://full%20address=s:${device.host}:${device.port}`) },
+            {
+              text: 'MS Remote Desktop',
+              onPress: () => Linking.openURL(`ms-rd:connect?pc=${encodeURIComponent(rdpHost)}`).catch(() =>
+                Linking.openURL(`https://play.google.com/store/apps/details?id=com.microsoft.rdc.androidx`)
+              ),
+            },
+            {
+              text: 'RustDesk / Lainnya',
+              onPress: () => Linking.openURL(`rdp://${rdpHost}`).catch(() =>
+                Alert.alert('Info', 'Install app Remote Desktop terlebih dahulu dari Play Store')
+              ),
+            },
           ]
         );
         break;
