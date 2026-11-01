@@ -37,25 +37,16 @@ interface DiscoveredDevice {
 const SCAN_PORTS = [80, 443, 8080, 8443, 8291, 8728, 3000, 9090];
 
 /**
- * Probe a single IP:port using fetch with timing-based detection.
- *
- * On native (Android/iOS), fetch() throws 'TypeError: Network request failed'
- * for BOTH connection-refused AND unreachable hosts. We distinguish them by
- * how fast the error comes back:
- *   - Connection refused: fails FAST (< 500ms) → host IS alive, port closed
- *   - Unreachable/no host: times out or takes a long time → host is down
- *
- * Returns: { alive: boolean; response?: Response }
- *   alive=true means the host exists (either HTTP responded or fast refusal).
- *   response is set only when we got a real HTTP response (for header parsing).
+ * Probe a single IP:port via HTTP fetch.
+ * STRICT: only alive if we get a real HTTP response.
+ * ALL errors (timeout, refused, unreachable) = not alive.
  */
 async function probePort(
-  ip: string, port: number, timeoutMs: number = 2000
+  ip: string, port: number, timeoutMs: number = 2500
 ): Promise<{ alive: boolean; response?: Response }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const scheme = port === 443 || port === 8443 ? 'https' : 'http';
-  const startTime = Date.now();
 
   try {
     const response = await fetch(`${scheme}://${ip}:${port}/`, {
@@ -65,34 +56,11 @@ async function probePort(
       reactNative: { textStreaming: true },
     });
     clearTimeout(timer);
-    // Got actual HTTP response (200, 401, 403, 404, 500, etc.) = host is alive
+    // Got real HTTP response (200, 301, 401, 403, 404, 500, etc.) = host alive
     return { alive: true, response };
   } catch (err: any) {
     clearTimeout(timer);
-    const elapsed = Date.now() - startTime;
-
-    if (Platform.OS === 'web') {
-      // On web: CORS TypeError means the host DID respond but browser blocked it
-      if (err.name === 'TypeError' && err.message !== 'Failed to fetch') {
-        return { alive: true };
-      }
-      return { alive: false };
-    }
-
-    // Native (Android/iOS) — timing-based detection:
-    // AbortError = our timeout fired → host didn't respond in time → down
-    if (err.name === 'AbortError') {
-      return { alive: false };
-    }
-
-    // TypeError "Network request failed" — check timing:
-    // Fast failure (< 500ms) = connection refused = host IS alive, port closed
-    // Slow failure (>= 500ms) = network unreachable / no route = host down
-    const FAST_THRESHOLD = 500;
-    if (elapsed < FAST_THRESHOLD) {
-      return { alive: true }; // fast refusal → host exists
-    }
-
+    // ANY error = host down or port closed. No guessing.
     return { alive: false };
   }
 }

@@ -15,6 +15,7 @@ const PROTO: Record<ConnectionProtocol, { label: string; icon: string; color: st
   'mikrotik-api': { label: 'MikroTik', icon: '🔧', color: '#89b4fa' },
   http: { label: 'HTTP', icon: '🌐', color: '#74c7ec' },
   https: { label: 'HTTPS', icon: '🔒', color: '#94e2d5' },
+  rdp: { label: 'RDP', icon: '🖥', color: '#cba6f7' },
 };
 
 const VENDORS: Record<DeviceVendor, string> = {
@@ -250,6 +251,17 @@ export const DeviceListScreen = ({ navigation }: any) => {
           url: `${device.protocol}://${device.host}:${device.port}`,
         });
         break;
+      case 'rdp':
+        // Open RDP via external app (Microsoft Remote Desktop, etc.)
+        Alert.alert(
+          '🖥 RDP Connect',
+          `Buka ${device.host}:${device.port} di app Remote Desktop?\n\nPastikan app "Microsoft Remote Desktop" atau "RD Client" sudah terinstall.`,
+          [
+            { text: 'Batal', style: 'cancel' },
+            { text: 'Buka', onPress: () => Linking.openURL(`rdp://full%20address=s:${device.host}:${device.port}`) },
+          ]
+        );
+        break;
       default:
         navigation.navigate('Terminal', { deviceId: device.id });
     }
@@ -414,12 +426,12 @@ export const AddDeviceScreen = ({ navigation, route }: any) => {
   const [sshKey, setSshKey] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  const needsAuth = protocol === 'ssh' || protocol === 'telnet' || protocol === 'mikrotik-api';
+  const needsAuth = protocol === 'ssh' || protocol === 'telnet' || protocol === 'mikrotik-api' || protocol === 'rdp';
 
   const protos: { key: ConnectionProtocol; defaultPort: string }[] = [
     { key: 'ssh', defaultPort: '22' }, { key: 'telnet', defaultPort: '23' },
-    { key: 'mikrotik-api', defaultPort: '8728' }, { key: 'http', defaultPort: '80' },
-    { key: 'https', defaultPort: '443' },
+    { key: 'mikrotik-api', defaultPort: '8728' }, { key: 'rdp', defaultPort: '3389' },
+    { key: 'http', defaultPort: '80' }, { key: 'https', defaultPort: '443' },
   ];
 
   const vendorList: DeviceVendor[] = [

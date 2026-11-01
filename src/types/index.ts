@@ -4,7 +4,7 @@
 // Device & Connection Types
 // ============================================
 
-export type ConnectionProtocol = 'ssh' | 'telnet' | 'mikrotik-api' | 'http' | 'https';
+export type ConnectionProtocol = 'ssh' | 'telnet' | 'mikrotik-api' | 'http' | 'https' | 'rdp';
 
 export type DeviceVendor =
   | 'mikrotik'
